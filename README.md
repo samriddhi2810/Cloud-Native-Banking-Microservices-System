@@ -43,7 +43,9 @@ docker run -d \
   -e MYSQL_ROOT_PASSWORD=password \
   -e MYSQL_DATABASE=bank \
   -p 3306:3306 \
-  mysql:5.7
+  mysql:5.7 
+  ---
+  
 2. Run User Service
 cd user-service
 uvicorn app.main:app --reload
