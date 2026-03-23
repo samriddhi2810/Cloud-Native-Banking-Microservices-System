@@ -37,32 +37,39 @@ A full-stack banking system built using microservices architecture with FastAPI,
 
 ### 1. Start MySQL container
 
+### 1. Start MySQL container
+
 ```bash
 docker run -d \
   --name mysql-container \
   -e MYSQL_ROOT_PASSWORD=password \
   -e MYSQL_DATABASE=bank \
   -p 3306:3306 \
-  mysql:5.7 
-  ---
-  
+  mysql:5.7
+
+
 2. Run User Service
 cd user-service
 uvicorn app.main:app --reload
+
 3. Run Transaction Service
 cd transaction-service
 uvicorn app.main:app --reload --port 8001
+
 4. Run Frontend
 cd frontend
 streamlit run app.py
+
 📸 Features Demo
 Login / Register / Reset Password
 Dashboard with balance
 Transfer money
 Transaction history
+
 🔐 Security
 Password hashing using bcrypt
 JWT-based authentication
+
 📌 Future Improvements
 Kubernetes deployment
 API Gateway
