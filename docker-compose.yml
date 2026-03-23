@@ -1,0 +1,43 @@
+version: '3.8'
+
+services:
+
+  mysql:
+    image: mysql:5.7
+    container_name: mysql-container
+    environment:
+      MYSQL_ROOT_PASSWORD: password
+      MYSQL_DATABASE: bank
+    ports:
+      - "3306:3306"
+
+  user-service:
+    build: ./user-service
+    container_name: user-service
+    ports:
+      - "8000:8000"
+    depends_on:
+      - mysql
+
+  transaction-service:
+    build: ./transaction-service
+    container_name: transaction-service
+    ports:
+      - "8001:8000"
+    depends_on:
+      - mysql
+
+  notification-service:
+    build: ./notification-service
+    container_name: notification-service
+    ports:
+      - "8002:8000"
+
+  frontend:
+    build: ./frontend
+    container_name: frontend
+    ports:
+      - "8501:8501"
+    depends_on:
+      - user-service
+      - transaction-service
