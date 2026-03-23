@@ -48,41 +48,41 @@ docker run -d \
 ---
 
 ## 2. Run User Service
-cd user-service
-uvicorn app.main:app --reload
+- cd user-service
+- uvicorn app.main:app --reload
 
 ---
 
 ## 3. Run Transaction Service
-cd transaction-service
-uvicorn app.main:app --reload --port 8001
+- cd transaction-service
+- uvicorn app.main:app --reload --port 8001
 
 ---
 
 ## 4. Run Frontend
-cd frontend
-streamlit run app.py
+- cd frontend
+- streamlit run app.py
 
 ---
 
 ## 📸 Features Demo
-Login / Register / Reset Password
-Dashboard with balance
-Transfer money
-Transaction history
+- Login / Register / Reset Password
+- Dashboard with balance
+- Transfer money
+- Transaction history
 
 ---
 
 ## 🔐 Security
-Password hashing using bcrypt
-JWT-based authentication
+- Password hashing using bcrypt
+- JWT-based authentication
 
 ---
 
 ## 📌 Future Improvements
-Kubernetes deployment
-API Gateway
-Authentication middleware
-UI enhancements
+- Kubernetes deployment
+- API Gateway
+- Authentication middleware
+- UI enhancements
 
 ---
