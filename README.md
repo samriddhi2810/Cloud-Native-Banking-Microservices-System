@@ -45,31 +45,44 @@ docker run -d \
   -p 3306:3306 \
   mysql:5.7
 ```
+---
 
-2. Run User Service
+## 2. Run User Service
 cd user-service
 uvicorn app.main:app --reload
 
-3. Run Transaction Service
+---
+
+## 3. Run Transaction Service
 cd transaction-service
 uvicorn app.main:app --reload --port 8001
 
-4. Run Frontend
+---
+
+## 4. Run Frontend
 cd frontend
 streamlit run app.py
 
-📸 Features Demo
+---
+
+## 📸 Features Demo
 Login / Register / Reset Password
 Dashboard with balance
 Transfer money
 Transaction history
 
-🔐 Security
+---
+
+## 🔐 Security
 Password hashing using bcrypt
 JWT-based authentication
 
-📌 Future Improvements
+---
+
+## 📌 Future Improvements
 Kubernetes deployment
 API Gateway
 Authentication middleware
 UI enhancements
+
+---
