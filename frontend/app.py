@@ -1,16 +1,21 @@
+import os
 import streamlit as st
 import requests
-from jose import jwt
 
-USER_SERVICE = "http://localhost:8000"
-TXN_SERVICE = "http://localhost:8001"
+# Docker-compose service names resolve inside the Docker network; env vars
+# let this still work if you run the frontend outside Docker.
+USER_SERVICE = os.getenv("USER_SERVICE_URL", "http://user-service:8000")
+TXN_SERVICE = os.getenv("TXN_SERVICE_URL", "http://transaction-service:8000")
 
-SECRET_KEY = "your_secret_key"
-ALGORITHM = "HS256"
 
 def get_user_id_from_token(token):
-    decoded = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-    return int(decoded["sub"])
+    """Ask user-service who this token belongs to, instead of the frontend
+    decoding the JWT itself. This is the reason the JWT secret no longer
+    needs to be duplicated (and hardcoded) here — only the service that
+    issues tokens needs to hold the secret."""
+    res = requests.get(f"{USER_SERVICE}/me", params={"token": token})
+    res.raise_for_status()
+    return res.json()["user_id"]
 
 # 🎨 CLEAN NAVY + SOFT NEON THEME
 st.markdown("""
@@ -100,12 +105,11 @@ if st.session_state.access_token is None:
         if st.button("Login", key="login_btn"):
             res = requests.post(
                 f"{USER_SERVICE}/login",
-                params={"username": username, "password": password}
+                json={"username": username, "password": password}
             )
 
-            data = res.json()
-
-            if "access_token" in data:
+            if res.status_code == 200:
+                data = res.json()
                 st.session_state.access_token = data["access_token"]
                 st.session_state.user_id = get_user_id_from_token(data["access_token"])
 
@@ -124,33 +128,36 @@ if st.session_state.access_token is None:
         if st.button("Create Account", key="register_btn"):
             res = requests.post(
                 f"{USER_SERVICE}/register",
-                params={"username": new_user, "password": new_pass}
+                json={"username": new_user, "password": new_pass}
             )
 
-            st.success("Account created! Please login.")
-
-            # 🔥 AUTO SWITCH BACK
-            st.session_state.mode = "login"
-            st.rerun()
+            if res.status_code == 200:
+                st.success("Account created! Please login.")
+                st.session_state.mode = "login"
+                st.rerun()
+            else:
+                st.error(res.json().get("detail", "Registration failed"))
 
     # 🔑 RESET PASSWORD (FIXED UX)
     elif st.session_state.mode == "reset":
         st.subheader("Reset Password")
 
         reset_user = st.text_input("Username")
+        old_pass = st.text_input("Current Password", type="password")
         new_pass = st.text_input("New Password", type="password")
 
         if st.button("Reset Password", key="reset_btn"):
             res = requests.post(
                 f"{USER_SERVICE}/reset-password",
-                params={"username": reset_user, "new_password": new_pass}
+                json={"username": reset_user, "old_password": old_pass, "new_password": new_pass}
             )
 
-            st.success("Password updated!")
-
-            # 🔥 AUTO GO BACK TO LOGIN
-            st.session_state.mode = "login"
-            st.rerun()
+            if res.status_code == 200:
+                st.success("Password updated!")
+                st.session_state.mode = "login"
+                st.rerun()
+            else:
+                st.error(res.json().get("detail", "Reset failed"))
 
 # DASHBOARD
 else:

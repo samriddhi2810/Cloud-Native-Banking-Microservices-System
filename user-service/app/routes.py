@@ -1,4 +1,6 @@
-from fastapi import APIRouter
+import os
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
 from app.database import SessionLocal
 from app.models import User
 from passlib.context import CryptContext
@@ -9,9 +11,33 @@ router = APIRouter()
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
-SECRET_KEY = "your_secret_key"
+# Secret is now read from an env var (set in docker-compose) instead of being
+# hardcoded and duplicated across services.
+SECRET_KEY = os.getenv("JWT_SECRET_KEY", "your_secret_key")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60
+
+
+class RegisterRequest(BaseModel):
+    username: str
+    password: str
+
+
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+
+class ResetPasswordRequest(BaseModel):
+    username: str
+    old_password: str
+    new_password: str
+
+
+class UpdateBalanceRequest(BaseModel):
+    user_id: int
+    amount: float
+
 
 def create_access_token(data: dict):
     to_encode = data.copy()
@@ -19,97 +45,141 @@ def create_access_token(data: dict):
     to_encode.update({"exp": expire})
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
+
 def verify_token(token: str):
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        user_id: str = payload.get("sub")
-        if user_id is None:
-            return None
-        return user_id
+        return payload.get("sub")
     except jwt.JWTError:
         return None
 
+
+def user_public(user: User) -> dict:
+    """Serialize a user WITHOUT the password hash — used everywhere a user
+    is returned so credential material never leaves this service."""
+    return {"id": user.id, "username": user.username, "balance": user.balance}
+
+
 @router.post("/register")
-def register(username: str, password: str):
+def register(payload: RegisterRequest):
     db = SessionLocal()
+    try:
+        existing = db.query(User).filter(User.username == payload.username).first()
+        if existing:
+            raise HTTPException(status_code=409, detail="Username already taken")
 
-    user = User(username=username, password=pwd_context.hash(password))
-    db.add(user)
-    db.commit()
-    db.refresh(user)
+        user = User(username=payload.username, password=pwd_context.hash(payload.password))
+        db.add(user)
+        db.commit()
+        db.refresh(user)
 
-    return {"message": "User registered", "user_id": user.id}
+        return {"message": "User registered", "user_id": user.id}
+    finally:
+        db.close()
+
 
 @router.get("/users")
 def get_users():
     db = SessionLocal()
-    users = db.query(User).all()
+    try:
+        users = db.query(User).all()
+        # Password hashes are stripped before this ever leaves the service —
+        # previously the full ORM object (hash included) was serialized and
+        # sent to transaction-service and the frontend.
+        return [user_public(u) for u in users]
+    finally:
+        db.close()
 
-    return users
 
 @router.post("/update-balance")
-def update_balance(user_id: int, amount: int):
+def update_balance(payload: UpdateBalanceRequest):
     db = SessionLocal()
+    try:
+        # with_for_update() takes a row-level lock in MySQL (SELECT ... FOR
+        # UPDATE), so if two requests hit this endpoint for the same user at
+        # the same time, the second one blocks until the first commits
+        # instead of both reading the same stale balance. This is what was
+        # missing before — the same class of bug row-level locking fixes in
+        # FinQueue.
+        user = (
+            db.query(User)
+            .filter(User.id == payload.user_id)
+            .with_for_update()
+            .first()
+        )
 
-    user = db.query(User).filter(User.id == user_id).first()
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
 
-    if not user:
-        return {"error": "User not found"}
+        new_balance = user.balance + payload.amount
+        if new_balance < 0:
+            raise HTTPException(status_code=400, detail="Insufficient balance")
 
-    user.balance += amount
-    db.commit()
+        user.balance = new_balance
+        db.commit()
 
-    return {"message": "Balance updated", "new_balance": user.balance}
+        return {"message": "Balance updated", "new_balance": user.balance}
+    except HTTPException:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
 
 @router.post("/login")
-def login(username: str, password: str):
+def login(payload: LoginRequest):
     db = SessionLocal()
+    try:
+        user = db.query(User).filter(User.username == payload.username).first()
 
-    user = db.query(User).filter(User.username == username).first()
+        if not user or not pwd_context.verify(payload.password, user.password):
+            # Same error for "no such user" and "wrong password" so the
+            # response doesn't leak which usernames exist.
+            raise HTTPException(status_code=401, detail="Invalid username or password")
 
-    if not user:
-        return {"error": "User not found"}
+        token = create_access_token({"sub": str(user.id)})
 
-    if not pwd_context.verify(password, user.password):
-        return {"error": "Invalid password"}
+        return {
+            "message": "Login successful",
+            "access_token": token,
+            "token_type": "bearer",
+        }
+    finally:
+        db.close()
 
-    token = create_access_token({"sub": str(user.id)})
-
-    return {
-        "message": "Login successful",
-        "access_token": token,
-        "token_type": "bearer"
-    }
 
 @router.post("/reset-password")
-def reset_password(username: str, new_password: str):
+def reset_password(payload: ResetPasswordRequest):
+    """Now requires the account's CURRENT password to change it — previously
+    anyone who knew just a username could reset that user's password with no
+    verification at all. This keeps the flow usable pre-login (no JWT
+    needed) while still proving the caller actually owns the account."""
     db = SessionLocal()
+    try:
+        user = db.query(User).filter(User.username == payload.username).first()
+        if not user or not pwd_context.verify(payload.old_password, user.password):
+            raise HTTPException(status_code=401, detail="Invalid username or password")
 
-    user = db.query(User).filter(User.username == username).first()
+        user.password = pwd_context.hash(payload.new_password)
+        db.commit()
 
-    if not user:
-        return {"error": "User not found"}
+        return {"message": "Password updated successfully"}
+    finally:
+        db.close()
 
-    hashed_password = pwd_context.hash(new_password)
-    user.password = hashed_password
-    db.commit()
-
-    return {"message": "Password updated successfully"}
 
 @router.get("/me")
 def get_current_user(token: str):
     user_id = verify_token(token)
     if not user_id:
-        return {"error": "Invalid token"}
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
 
     db = SessionLocal()
-    user = db.query(User).filter(User.id == int(user_id)).first()
+    try:
+        user = db.query(User).filter(User.id == int(user_id)).first()
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
 
-    if not user:
-        return {"error": "User not found"}
-
-    return {
-        "user_id": user.id,
-        "username": user.username,
-        "balance": user.balance
-    }
+        return user_public(user)
+    finally:
+        db.close()

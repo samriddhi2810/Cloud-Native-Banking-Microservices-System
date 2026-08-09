@@ -3,29 +3,45 @@ version: '3.8'
 services:
 
   mysql:
-    image: mysql:5.7
+    image: mysql:8.0
     container_name: mysql-container
     environment:
       MYSQL_ROOT_PASSWORD: password
       MYSQL_DATABASE: bank
     ports:
       - "3306:3306"
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-ppassword"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
   user-service:
     build: ./user-service
     container_name: user-service
+    environment:
+      DATABASE_URL: mysql+pymysql://root:password@mysql:3306/bank
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-change_me_in_prod}
     ports:
       - "8000:8000"
     depends_on:
-      - mysql
+      mysql:
+        condition: service_healthy
 
   transaction-service:
     build: ./transaction-service
     container_name: transaction-service
+    environment:
+      DATABASE_URL: mysql+pymysql://root:password@mysql:3306/bank
+      USER_SERVICE_URL: http://user-service:8000
+      NOTIFICATION_SERVICE_URL: http://notification-service:8000
     ports:
       - "8001:8000"
     depends_on:
-      - mysql
+      mysql:
+        condition: service_healthy
+      user-service:
+        condition: service_started
 
   notification-service:
     build: ./notification-service
@@ -36,6 +52,9 @@ services:
   frontend:
     build: ./frontend
     container_name: frontend
+    environment:
+      USER_SERVICE_URL: http://user-service:8000
+      TXN_SERVICE_URL: http://transaction-service:8000
     ports:
       - "8501:8501"
     depends_on:
